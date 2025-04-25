@@ -1,1 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Embedded Composer</title>
+
+  <!-- Quill -->
+  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+
+  <style>
+    body{margin:0;font-family:Roboto,Arial,sans-serif;background:#f5f5f5}
+    .composer{max-width:600px;margin:1rem auto;background:#fff;
+      border:1px solid #ddd;border-radius:8px;overflow:hidden;
+      box-shadow:0 4px 10px rgba(0,0,0,0.05)}
+    .composer-header{display:flex;justify-content:space-between;
+      align-items:center;padding:10px 16px;border-bottom:1px solid #eee}
+    .composer-header label{margin-left:16px;cursor:pointer;color:#555}
+    .composer-header input:checked+span{color:#A77653}
+    .row{display:grid;grid-template-columns:70px 1fr;align-items:center;
+      padding:8px 16px}
+    .row label{font-weight:500;color:#333}
+    .row input{padding:8px;border:0;border-bottom:1px solid #eee;font-size:14px;
+      outline:none}
+    .row input:focus{border-color:#A77653}
+    #ccBccRows{display:none;flex-direction:column}
+    #toggleCcBcc{background:none;border:none;color:#A77653;cursor:pointer}
+    #editor,#smsBody{width:100%;min-height:140px;box-sizing:border-box;
+      padding:10px 16px;font-size:14px;outline:none}
+    #smsBody{border:1px solid #eee;border-radius:4px;resize:vertical}
+    .attachments{display:flex;align-items:center;padding:8px 16px;gap:12px}
+    .attachments input[type="file"]{flex:1}
+    .attachments span{font-size:13px;color:#666}
+    .send-btn{display:block;width:100%;padding:12px 0;
+      background:#A77653;color:#fff;border:none;font-size:16px;
+      font-weight:500;cursor:pointer;transition:background .2s}
+    .send-btn:hover{background:#8f5f42}
+    .warning{padding:12px 16px;color:#c62828;font-size:14px}
+  </style>
+</head>
+<body>
+
+<div id="composer-root"></div>
+
+<script>
+(function(){
+  const WEBHOOK = 'https://n8n.intelechia.com/webhook-test/softr_outgoing_comms';
+
+  function detectContact(){
+    let email=null, phone=null;
+    const m=document.querySelector('a[href^="mailto:"]');
+    if(m) email=m.href.replace(/^mailto:/,'').split('?')[0];
+    const t=document.querySelector('a[href^="tel:"]');
+    if(t) phone=t.href.replace(/^tel:/,'');
+    return {email,phone};
+  }
+
+  // Build UI
+  const {email,phone}=detectContact();
+  const hasEmail=!!email, hasPhone=!!phone;
+  const root=document.getElementById('composer-root');
+
+  if(!hasEmail){
+    root.innerHTML=`
+      <div class="composer">
+        <div class="composer-header"><span>SMS Only</span></div>
+        <div class="warning">
+          No email on file.<br>
+          <em>Please add an email in your Softr profile to enable Email.</em>
+        </div>
+        <div class="row"><label>To:</label>
+          <input id="smsTo" value="${phone||''}" placeholder="Phone#">
+        </div>
+        <textarea id="smsBody" placeholder="Write your message…"></textarea>
+        <div class="attachments">
+          <input type="file" id="smsFiles" multiple>
+          <span id="smsFileNames"></span>
+        </div>
+        <button class="send-btn" id="sendSms">Send SMS</button>
+      </div>`;
+    // SMS preview + send
+    document.getElementById('smsFiles').onchange = e=>
+      document.getElementById('smsFileNames').textContent =
+        Array.from(e.target.files).map(f=>f.name).join(', ');
+    document.getElementById('sendSms').onclick = async()=>{
+      const fd=new FormData();
+      fd.append('comms_type','sms');
+      fd.append('to',document.getElementById('smsTo').value);
+      fd.append('body',document.getElementById('smsBody').value);
+      fd.append('sent_at_utc',new Date().toISOString());
+      Array.from(document.getElementById('smsFiles').files)
+           .forEach(f=>fd.append('attachments[]',f));
+      const r=await fetch(WEBHOOK,{method:'POST',body:fd});
+      alert(r.ok?'SMS queued':'Error sending');
+    };
+    return;
+  }
+
+  // Full Composer
+  root.innerHTML=`
+    <div class="composer">
+      <div class="composer-header">
+        <span>New Message</span>
+        <div>
+          <label><input type="radio" name="mode" value="email" checked><span>Email</span></label>
+          <label><input type="radio" name="mode" value="sms" ${hasPhone?'':'disabled'}><span>SMS</span></label>
+        </div>
+      </div>
+      <div id="emailComposer">
+        <div class="row"><label>From:</label><input id="fromField" value="${email}" readonly></div>
+        <div class="row"><label>To:</label><input id="toField"  value="${email}"></div>
+        <div class="row" style="justify-content:flex-end;padding-right:16px">
+          <button id="toggleCcBcc">Cc Bcc</button>
+        </div>
+        <div id="ccBccRows">
+          <div class="row"><label>Cc:</label><input id="ccField" placeholder="Cc"></div>
+          <div class="row"><label>Bcc:</label><input id="bccField" placeholder="Bcc"></div>
+        </div>
+        <div class="row"><label>Subject:</label><input id="subject" placeholder="Subject"></div>
+        <textarea id="editor"></textarea>
+        <div class="attachments">
+          <input type="file" id="fileInput" multiple>
+          <span id="fileNames"></span>
+        </div>
+        <button class="send-btn" id="sendEmail">Send</button>
+      </div>
+      <div id="smsComposer" style="display:none;">
+        <div class="row"><label>To:</label><input id="smsTo" value="${phone||''}"></div>
+        <textarea id="smsBody" placeholder="Write your message…"></textarea>
+        <div class="attachments">
+          <input type="file" id="smsFiles" multiple>
+          <span id="smsFileNames"></span>
+        </div>
+        <button class="send-btn" id="sendSms">Send SMS</button>
+      </div>
+    </div>`;
+
+  // Toggle Cc/Bcc
+  document.getElementById('toggleCcBcc').onclick = ()=>{
+    const s=document.getElementById('ccBccRows');
+    s.style.display = s.style.display==='flex'?'none':'flex';
+  };
+
+  // Quill
+  new Quill('#editor',{
+    theme:'snow',
+    placeholder:'Write your message…',
+    modules:{ toolbar:[
+      ['bold','italic','underline'],
+      [{list:'bullet'},{list:'ordered'}],
+      ['link']
+    ]}
+  });
+
+  // Previews
+  document.getElementById('fileInput').onchange = e=>
+    document.getElementById('fileNames').textContent =
+      Array.from(e.target.files).map(f=>f.name).join(', ');
+  document.getElementById('smsFiles').onchange = e=>
+    document.getElementById('smsFileNames').textContent =
+      Array.from(e.target.files).map(f=>f.name).join(', ');
+
+  // Mode switch
+  Array.from(document.getElementsByName('mode')).forEach(r=>{
+    r.onchange = ()=>{
+      const isE = r.value==='email';
+      document.getElementById('emailComposer').style.display = isE?'block':'none';
+      document.getElementById('smsComposer') .style.display = isE?'none':'block';
+    };
+  });
+
+  // Send Email
+  document.getElementById('sendEmail').onclick = async()=>{
+    const fd=new FormData();
+    fd.append('comms_type','email');
+    fd.append('from',document.getElementById('fromField').value);
+    fd.append('to',document.getElementById('toField').value);
+    fd.append('cc',document.getElementById('ccField').value);
+    fd.append('bcc',document.getElementById('bccField').value);
+    fd.append('subject',document.getElementById('subject').value);
+    fd.append('body_html',document.querySelector('#editor .ql-editor').innerHTML);
+    fd.append('body_text',new Quill('#editor').getText());
+    fd.append('sent_at_utc',new Date().toISOString());
+    Array.from(document.getElementById('fileInput').files)
+         .forEach(f=>fd.append('attachments[]',f));
+    const r=await fetch(WEBHOOK,{method:'POST',body:fd});
+    alert(r.ok?'Email queued':'Error sending');
+  };
+
+  // Send SMS
+  document.getElementById('sendSms').onclick = async()=>{
+    const fd=new FormData();
+    fd.append('comms_type','sms');
+    fd.append('to',document.getElementById('smsTo').value);
+    fd.append('body',document.getElementById('smsBody').value);
+    fd.append('sent_at_utc',new Date().toISOString());
+    Array.from(document.getElementById('smsFiles').files)
+         .forEach(f=>fd.append('attachments[]',f));
+    const r=await fetch(WEBHOOK,{method:'POST',body:fd});
+    alert(r.ok?'SMS queued':'Error sending');
+  };
+
+})();
+</script>
 
